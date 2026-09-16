@@ -3,26 +3,29 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 from tqdm import tqdm
 import pickle
+import os
 from pathlib import Path
 
 class Particles_2D():
 
-    def __init__(self,N=100,delta_step=1.5,density=0.1,temperature=0.1,R=None):
+    def __init__(self,N=100,delta_step=0.4,density=0.1,temperature=0.1,R=None):
 
         #constant parameters
         self.sigma_0 = 1    # Particle hard core diameter
         self.sigma_1 = 2.5  # Particle soft core diameter
-        self.delta_step = delta_step            # Delta parameter for random particle step
 
 
         #system parameters
         self.N = N                                         # Number of particles                       
         self.density = density                             # Reduced density defined as N*(sigma_0^2)/L^2
         self.temperature = temperature                     # Reduced temperature defined as kT/epsilon
+        self.beta = 1/self.temperature                     # Reduced beta defines as epsilon/kT
         self.LENGTH = self.sigma_0*np.sqrt(N/self.density) # Side length of boundary box
+        self.delta_step = delta_step                       # Delta parameter for random particle stepping
+
 
         #system variables
-        if R:
+        if R is not None:
             self.R = R      # Particle positions vector (randomly initialize if no input provided)
         else:
             self.R = np.random.uniform(0, self.LENGTH, size=(N, 2))
@@ -31,6 +34,9 @@ class Particles_2D():
         self.energy = self.calc_total_U()           # Total system energy obtained by the sum of potentials
         self.accepted_movements = 0                 # Number of accepted particle movements in current Monte-Carlo loop
         self.mc_iterations = 0                      # Number of iterations in current loop Monte-Carlo loop
+        self.energy_mean = 0                        # Energy average for current iteration
+        self.energy_M2 = 0                          # Sum of squares of the difference between each computed energy state and the average
+        self.equilibrium_array = []                 # Array of energies used in equilibrium phase
 
 
     def calc_total_U(self):
@@ -59,17 +65,15 @@ class Particles_2D():
             dx = dx - self.LENGTH * np.round(dx / self.LENGTH)
             dy = dy - self.LENGTH * np.round(dy / self.LENGTH)
 
-            # Distance
-            r = np.sqrt(dx**2 + dy**2)
+            # Distances squared
+            r2 = dx**2 + dy**2
 
             # Particle overlapping condition
-            overlap_bool = [d < self.sigma_0 for d in r]
-
-            if any(overlap_bool):
+            if np.any(r2 < self.sigma_0**2):
                 return np.inf
 
             # Total energy contribution of particle i
-            total_U += sum([1 for d in r if d<self.sigma_1])
+            total_U += np.count_nonzero(r2 < self.sigma_1**2)
 
         return total_U
 
@@ -95,14 +99,14 @@ class Particles_2D():
         dx = dx - self.LENGTH * np.round(dx / self.LENGTH)
         dy = dy - self.LENGTH * np.round(dy / self.LENGTH)
 
-        # Distance
-        r = np.sqrt(dx**2 + dy**2)
+        # Distances squared
+        r2 = dx**2 + dy**2
 
         # Particle overlapping condition
-        if any([d < self.sigma_0 for d in r]):
+        if np.any(r2 < self.sigma_0**2):
             return np.inf
 
-        return sum([1 for d in r if d<self.sigma_1])
+        return np.count_nonzero(r2 < self.sigma_1**2)
     
 
     def calc_new_pos(self,p):
@@ -140,11 +144,11 @@ class Particles_2D():
             dx = dx - self.LENGTH * np.round(dx / self.LENGTH)
             dy = dy - self.LENGTH * np.round(dy / self.LENGTH)
 
-            # Distance
-            r = np.sqrt(dx**2 + dy**2)
+            # Distances squared
+            r2 = dx**2 + dy**2
 
             # Overlaps contributed from particle i
-            total_overlaps += sum([d < self.sigma_0 for d in r])
+            total_overlaps += np.count_nonzero(r2 < self.sigma_0**2)
             
         return total_overlaps
 
@@ -169,10 +173,10 @@ class Particles_2D():
         dx = dx - self.LENGTH * np.round(dx / self.LENGTH)
         dy = dy - self.LENGTH * np.round(dy / self.LENGTH)
 
-        # Distance
-        r = np.sqrt(dx**2 + dy**2)
+        # Distances squared
+        r2 = dx**2 + dy**2
 
-        return sum([d < self.sigma_0 for d in r])
+        return np.count_nonzero(r2 < self.sigma_0**2)
 
 
     def execute_production_functions(self):
@@ -181,19 +185,30 @@ class Particles_2D():
         return None
 
 
-    def run_mc(self,max_iter=2*(10**7),hotstart=False,production=False):
+    def update_estimators(self):
+        """
+        Welford's online algorithm for estimating the variance of energy
+        """
+        current_mean = self.energy_mean
+        self.energy_mean += (self.energy - self.energy_mean) / self.mc_iterations
+        self.energy_M2 += (self.energy - current_mean) * (self.energy - self.energy_mean)
+
+
+    def run_mc(self,max_iter=2*(10**7),hotstart=False,production=False,equilibrium=False):
         """
         Monte-Carlo simulation of the system
         """
+        self.energy = self.calc_total_U()
         for i in tqdm(range(max_iter),miniters=max(1, max_iter//100)):
             self.mc_iterations += 1
+
             # Randomly select a particle
             p_idx = np.random.choice(self.N)
             p = self.R[p_idx]
 
             # Make a trial displacement
             p_new = self.calc_new_pos(p)
-
+ 
             # Calculate the change of energy in the system if we were accept the particle displacement
             U_m = self.calc_individual_U(p_idx,p)       #Energy contribution of current particle
             U_n = self.calc_individual_U(p_idx,p_new)   #Energy contribution of trial particle
@@ -215,7 +230,7 @@ class Particles_2D():
             else:
                 ξ = np.random.random()
                 delta_U = U_n - U_m
-                if ξ < np.exp(-self.temperature*delta_U) and not np.isinf(U_n):
+                if ξ < np.exp(-self.beta*delta_U) and not np.isinf(U_n):
                     self.R[p_idx] = p_new
                     self.accepted_movements += 1
                     self.energy += delta_U
@@ -225,8 +240,8 @@ class Particles_2D():
                 print(f"Cold start reached in {self.mc_iterations}")
                 break
 
-            # System checks and execute of production functions
-            if i % (max_iter//10) and not hotstart:
+            # System checks
+            if (i % (max_iter//10) == 0) and not hotstart:
 
                 # Verifies if every particle remains inside the box
                 for idx,p in enumerate(self.R):
@@ -243,23 +258,44 @@ class Particles_2D():
                 if self.overlaps != 0:
                     raise ValueError(f"{self.overlaps} overlaps encountered")
 
-                if production:
-                    self.execute_production_functions()
-    
+            # Equilibrium plot
+            if (i % (max_iter//1000) == 0) and equilibrium:
+                self.equilibrium_array.append(-self.beta*self.energy)
+
+            # System update of statistical estimators
+            if production:
+                self.update_estimators()
+
+
+    def state_snapshot(self,directory=r"snapshots_drop_temp"):    
+
+        fig, ax = plt.subplots()
+        ax.scatter(self.R[:, 0], self.R[:, 1], color="#189536cc", alpha=0.67)
+        
+        # Plot configuration
+        ax.set_xticks([])
+        ax.set_yticks([])
+        plt.tight_layout()
+        
+        # Save snapshot in specified directory
+        rute = os.path.join(directory, f"d_{self.density}_t_{self.temperature}_mc_iter_{self.mc_iterations}.jpg")
+        plt.savefig(rute, bbox_inches='tight', dpi=300)
+        plt.close(fig)
+
 
     def scatter(self):
         fig, ax = plt.subplots(figsize=(10, 10))
 
-        # Partículas
+        # Particles
         ax.scatter(self.R[:, 0], self.R[:, 1], color="black", s=5)
 
-        # Núcleos soft
+        # Soft cores
         for x, y in self.R:
             ax.add_patch(
                 plt.Circle((x, y), self.sigma_1/2, color="blue", alpha=0.15)
             )
 
-        # Núcleos hard
+        # Hard cores
         for x, y in self.R:
             ax.add_patch(
                 plt.Circle((x, y), self.sigma_0/2, color="blue", alpha=0.5)
@@ -276,8 +312,12 @@ class Particles_2D():
         f"\nEnergy: {self.energy}"
         f"\nAccepted movements: {self.accepted_movements}"
         f"\nCompleted iterations: {self.mc_iterations}"
-        f"\nAcceptance ratio:{np.round(self.accepted_movements/max(1,self.mc_iterations),2)}")
-
+        f"\nAcceptance ratio:{np.round(self.accepted_movements/max(1,self.mc_iterations),2)}"
+        f"\n\n\nSystem Parameters"
+        f"\nNumber of particles:{self.N}"
+        f"\nDensity*:{self.density}"
+        f"\nTemperature*:{self.temperature}"
+        f"\nDelta Step:{self.delta_step}")
         print(m)
 
 
@@ -303,5 +343,5 @@ def coldstart_finder(N=100,max_iter=2*(10**5)):
             raise ValueError(f"No coldstart found after max_iter({max_iter})\n"
                              f"at density:{density} with delta:{delta}")
 
-        with open(f"coldstart/d_{density}_N_{N}.pkl", "wb") as f:
+        with open(f"coldstart_pickles/d_{density}_N_{N}.pkl", "wb") as f:
             pickle.dump(test_system, f)
