@@ -38,6 +38,10 @@ class Particles_2D():
         self.energy_M2 = 0                          # Sum of squares of the difference between each computed energy state and the average
         self.equilibrium_array = []                 # Array of energies used in equilibrium phase
 
+        # Radial distribution attributes
+        self.bin_centers = None                     # Store an array after calling the gr function
+        self.gr = None                              # Store gr values         "          "
+
 
     def calc_total_U(self):
         """
@@ -321,6 +325,58 @@ class Particles_2D():
         print(m)
 
 
+    def radial_distribution(self, dr=0.05):
+        """
+        Radial distribution function that plots the average density at a distance dr from a particle 
+        
+        Arguments:
+        dr : float
+            Width of distance bins.
+            
+        Returns:
+        bin_centers : np.ndarray, Radius values (r).
+        gr : np.ndarray, Radial distribution values g(r).
+        """
+        n = len(self.R)
+        max_r = self.LENGTH / 2.0  # Only measure up to half the box size
+        bins = np.arange(0, max_r + dr, dr)
+        
+        # 1. Compute all pairwise distances with Periodic Boundary Conditions (PBC)
+        distances = []
+        for i in range(n - 1):
+            dx = self.R[i, 0] - self.R[i+1:, 0]
+            dy = self.R[i, 1] - self.R[i+1:, 1]
+            
+            dx = dx - self.LENGTH * np.round(dx / self.LENGTH)
+            dy = dy - self.LENGTH * np.round(dy / self.LENGTH)
+            
+            r = np.sqrt(dx**2 + dy**2)
+            distances.extend(r)
+        distances = np.array(distances)
+        
+        # 2. Histogram particle distances
+        counts, _ = np.histogram(distances, bins=bins)
+        
+        # Multiply by 2 because pair (i,j) means i sees j AND j sees i
+        counts = counts * 2.0
+        
+        # 3. Normalize to get g(r)
+        self.bin_centers = (bins[:-1] + bins[1:]) / 2.0
+        shell_areas = np.pi * (bins[1:]**2 - bins[:-1]**2)  # Area of circular ring
+        bulk_density = n / (self.LENGTH**2)                      # Average overall density
+        
+        # Normalization equation: local density / bulk density
+        self.gr = (counts / n) / (shell_areas * bulk_density)
+
+        plt.figure(figsize=(7, 4))
+        plt.plot(self.bin_centers, self.gr, lw=2)
+        plt.axhline(1.0, color="gray", linestyle="--")  # Ideal gas bulk limit
+        plt.xlabel("Distance r")
+        plt.ylabel("g(r)")
+        plt.title("Radial Distribution Function")
+        plt.grid(True)
+        plt.show()
+
 
 
 def coldstart_finder(N=100,max_iter=2*(10**5)):
@@ -345,3 +401,7 @@ def coldstart_finder(N=100,max_iter=2*(10**5)):
 
         with open(f"coldstart_pickles/d_{density}_N_{N}.pkl", "wb") as f:
             pickle.dump(test_system, f)
+
+
+
+
