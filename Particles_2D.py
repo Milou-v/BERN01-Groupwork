@@ -33,7 +33,8 @@ class Particles_2D():
         self.overlaps = self.calc_total_overlaps()  # Number of particles with overlapping hard cores    
         self.energy = self.calc_total_U()           # Total system energy obtained by the sum of potentials
         self.accepted_movements = 0                 # Number of accepted particle movements in current Monte-Carlo loop
-        self.mc_iterations = 0                      # Number of iterations in current loop Monte-Carlo loop
+        self.mc_iterations = 0                      # Number of Monte-Carlo iterations for whole system
+        self.production_iterations = 0              # Number of Monte-Carlo iterations for production phase
         self.energy_mean = 0                        # Energy average for current iteration
         self.energy_M2 = 0                          # Sum of squares of the difference between each computed energy state and the average
         self.equilibrium_array = []                 # Array of energies used in equilibrium phase
@@ -194,8 +195,9 @@ class Particles_2D():
         Welford's online algorithm for estimating the variance of energy
         """
         current_mean = self.energy_mean
-        self.energy_mean += (self.energy - self.energy_mean) / self.mc_iterations
-        self.energy_M2 += (self.energy - current_mean) * (self.energy - self.energy_mean)
+        delta = self.energy - current_mean
+        self.energy_mean += delta / self.production_iterations
+        self.energy_M2 += delta * (self.energy - self.energy_mean)
 
 
     def run_mc(self,max_iter=2*(10**7),hotstart=False,production=False,equilibrium=False):
@@ -268,6 +270,7 @@ class Particles_2D():
 
             # System update of statistical estimators
             if production:
+                self.production_iterations += 1
                 self.update_estimators()
 
 
