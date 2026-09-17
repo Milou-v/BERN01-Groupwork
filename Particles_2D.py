@@ -42,7 +42,7 @@ class Particles_2D():
         self.energy_M2 = 0                          # Sum of squares of the difference between each computed energy state and the average
         self.equilibrium_array = []                 # Array of energies used in equilibrium phase
         self.max_iter = 0                           # Maximum number of iterations in current Monte-Carlo run
-        self.delta_step = delta_step                       # Delta parameter for random particle stepping
+        self.delta_step = delta_step                # Delta parameter for random particle stepping
 
 
         # Radial distribution attributes
@@ -159,12 +159,6 @@ class Particles_2D():
         return np.count_nonzero(r2 < self.sigma_0**2)
 
 
-    def execute_production_functions(self):
-        """ 
-        """
-        return None
-
-
     def update_estimators(self):
         """
         Welford's online algorithm for estimating the variance of energy
@@ -175,12 +169,13 @@ class Particles_2D():
         self.energy_M2 += delta * (self.energy - self.energy_mean)
 
 
-    def run_mc(self,max_iter=2*(10**7),hotstart=False,production=False,equilibrium=False):
+    def run_mc(self,max_iter=2*(10**7),hotstart=False,production=False,equilibrium=False,delta_optim=False):
         """
         Monte-Carlo simulation of the system
         """
         self.energy = self.calc_total_U()
         self.max_iter = max_iter
+        accept_loc = 0
         for i in tqdm(range(max_iter),miniters=max(1, max_iter//100)):
             self.mc_iterations += 1
 
@@ -207,6 +202,7 @@ class Particles_2D():
                         self.overlaps -= self.calc_individual_overlaps(p_idx,p)
                     self.R[p_idx] = p_new
                     self.accepted_movements += 1
+                    accept_loc += 1
                    
             else:
                 ξ = np.random.random()
@@ -214,6 +210,7 @@ class Particles_2D():
                 if ξ < np.exp(-self.beta*delta_U) and not np.isinf(U_n):
                     self.R[p_idx] = p_new
                     self.accepted_movements += 1
+                    accept_loc += 1
                     self.energy += delta_U
 
             # If the simulation is running on hotstart, then it stops when reaching a state with no overlaps
@@ -244,12 +241,16 @@ class Particles_2D():
                 self.equilibrium_array.append(-self.beta*self.energy)
 
             # Dynamical change of delta in equilibrium phase:
-            if equilibrium:
-                ar = self.accepted_movements/self.mc_iterations
-                if ar>=0.55:
-                    self.delta_step = self.delta_step*1.1
-                if ar<=0.35:
-                    self.delta_step = self.delta_step*0.9
+            if delta_optim and i % 500 == 0 and i > 0:
+                ratio = accept_loc / 500
+                if ratio > 0.7:
+                    self.delta_step *= 1.1
+
+                elif ratio < 0.25:
+                    self.delta_step *= 0.9
+                self.delta_step = min(self.delta_step, self.LENGTH)
+                accept_loc = 0
+
 
             # System update of statistical estimators
             if production:
@@ -274,25 +275,28 @@ class Particles_2D():
 
 
     def scatter(self):
-        fig, ax = plt.subplots(figsize=(10, 10))
-
-        # Particles
-        ax.scatter(self.R[:, 0], self.R[:, 1], color="black", s=5)
-
+        fig, ax = plt.subplots()
+        ax.set_xlim(0, self.LENGTH)
+        ax.set_ylim(0, self.LENGTH)
+        ax.set_aspect("equal")
+        
         # Soft cores
         for x, y in self.R:
             ax.add_patch(
-                plt.Circle((x, y), self.sigma_1/2, color="blue", alpha=0.15)
+                plt.Circle((x, y), self.sigma_1/2, color="#189536cc", alpha=0.09)
             )
 
         # Hard cores
         for x, y in self.R:
             ax.add_patch(
-                plt.Circle((x, y), self.sigma_0/2, color="blue", alpha=0.5)
+                plt.Circle((x, y), self.sigma_0/2, color="#189536cc", alpha=0.5)
             )
 
         ax.set_aspect("equal")
-        plt.suptitle(fr"$N={self.N}$")
+        # Plot configuration
+        ax.set_xticks([])
+        ax.set_yticks([])
+        plt.tight_layout()
         plt.title(fr"$\rho={self.density}$")
         plt.show()
 
