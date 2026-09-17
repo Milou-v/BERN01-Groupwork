@@ -5,6 +5,10 @@ from tqdm import tqdm
 import pickle
 import os
 from pathlib import Path
+from numba import njit
+
+
+
 
 class Particles_2D():
 
@@ -21,7 +25,6 @@ class Particles_2D():
         self.temperature = temperature                     # Reduced temperature defined as kT/epsilon
         self.beta = 1/self.temperature                     # Reduced beta defines as epsilon/kT
         self.LENGTH = self.sigma_0*np.sqrt(N/self.density) # Side length of boundary box
-        self.delta_step = delta_step                       # Delta parameter for random particle stepping
 
 
         #system variables
@@ -38,6 +41,9 @@ class Particles_2D():
         self.energy_mean = 0                        # Energy average for current iteration
         self.energy_M2 = 0                          # Sum of squares of the difference between each computed energy state and the average
         self.equilibrium_array = []                 # Array of energies used in equilibrium phase
+        self.max_iter = 0                           # Maximum number of iterations in current Monte-Carlo run
+        self.delta_step = delta_step                       # Delta parameter for random particle stepping
+
 
         # Radial distribution attributes
         self.bin_centers = None                     # Store an array after calling the gr function
@@ -81,37 +87,6 @@ class Particles_2D():
             total_U += np.count_nonzero(r2 < self.sigma_1**2)
 
         return total_U
-
-    
-    def calc_individual_U(self,p_idx,p):
-        """
-        Calculate the energy contribution in the system 
-        atributed to a single particle.
-
-        INPUT
-        self :: particles system (class) 
-        p_idx :: particle index (int)
-        p :: particle coordinates (np.array)
-
-        OUTPUT
-        Energy (np.Inf/int)
-        """
-        # coordinates differences from particle p to every other one
-        dx = p[0] - self.R[np.arange(self.N) != p_idx,0]
-        dy = p[1] - self.R[np.arange(self.N) != p_idx,1]
-
-        #PBC condition
-        dx = dx - self.LENGTH * np.round(dx / self.LENGTH)
-        dy = dy - self.LENGTH * np.round(dy / self.LENGTH)
-
-        # Distances squared
-        r2 = dx**2 + dy**2
-
-        # Particle overlapping condition
-        if np.any(r2 < self.sigma_0**2):
-            return np.inf
-
-        return np.count_nonzero(r2 < self.sigma_1**2)
     
 
     def calc_new_pos(self,p):
@@ -205,6 +180,7 @@ class Particles_2D():
         Monte-Carlo simulation of the system
         """
         self.energy = self.calc_total_U()
+        self.max_iter = max_iter
         for i in tqdm(range(max_iter),miniters=max(1, max_iter//100)):
             self.mc_iterations += 1
 
@@ -214,10 +190,9 @@ class Particles_2D():
 
             # Make a trial displacement
             p_new = self.calc_new_pos(p)
- 
             # Calculate the change of energy in the system if we were accept the particle displacement
-            U_m = self.calc_individual_U(p_idx,p)       #Energy contribution of current particle
-            U_n = self.calc_individual_U(p_idx,p_new)   #Energy contribution of trial particle
+            U_m = calc_individual_U(self.R,p_idx,p,self.LENGTH,self.sigma_0,self.sigma_1)       #Energy contribution of current particle
+            U_n = calc_individual_U(self.R,p_idx,p_new,self.LENGTH,self.sigma_0,self.sigma_1)   #Energy contribution of trial particle
 
             # Acceptance conditions for state transition
             # If both states contribute infinite energy, don´t accept
@@ -268,6 +243,14 @@ class Particles_2D():
             if (i % (max_iter//1000) == 0) and equilibrium:
                 self.equilibrium_array.append(-self.beta*self.energy)
 
+            # Dynamical change of delta in equilibrium phase:
+            if equilibrium:
+                ar = self.accepted_movements/self.mc_iterations
+                if ar>=0.55:
+                    self.delta_step = self.delta_step*1.1
+                if ar<=0.35:
+                    self.delta_step = self.delta_step*0.9
+
             # System update of statistical estimators
             if production:
                 self.production_iterations += 1
@@ -285,7 +268,7 @@ class Particles_2D():
         plt.tight_layout()
         
         # Save snapshot in specified directory
-        rute = os.path.join(directory, f"d_{self.density}_t_{self.temperature}_mc_iter_{self.mc_iterations}.jpg")
+        rute = os.path.join(directory, f"d_{self.density}_t_{self.temperature}.jpg")
         plt.savefig(rute, bbox_inches='tight', dpi=300)
         plt.close(fig)
 
@@ -315,6 +298,9 @@ class Particles_2D():
 
 
     def print_status(self):
+        """
+        Print relevant class attributes
+        """
         m = (f"Overlaps: {self.overlaps}" 
         f"\nEnergy: {self.energy}"
         f"\nAccepted movements: {self.accepted_movements}"
@@ -326,6 +312,18 @@ class Particles_2D():
         f"\nTemperature*:{self.temperature}"
         f"\nDelta Step:{self.delta_step}")
         print(m)
+
+
+    def reset_stats(self):
+        """
+        Function that resets statistical attributes in the system class
+        """
+        self.accepted_movements = 0
+        self.mc_iterations = 0
+        self.production_iterations = 0
+        self.energy_mean = 0
+        self.energy_M2 = 0
+        self.equilibrium_array = []
 
 
     def radial_distribution(self, dr=0.05):
@@ -406,5 +404,93 @@ def coldstart_finder(N=100,max_iter=2*(10**5)):
             pickle.dump(test_system, f)
 
 
+
+@njit
+def calc_individual_U(R,p_idx,p,LENGTH,sigma_0,sigma_1):
+    """
+    Calculate the energy contribution in the system 
+    atributed to a single particle.
+
+    INPUT
+    self :: particles system (class) 
+    p_idx :: particle index (int)
+    p :: particle coordinates (np.array)
+
+    OUTPUT
+    Energy (np.Inf/int)
+    """
+    energy = 0
+    for i in range(len(R)):
+        if i == p_idx:
+            continue
+        # coordinates differences from particle p to every other one
+        dx = p[0] - R[i,0]
+        dy = p[1] - R[i,1]
+
+        #PBC condition
+        dx = dx - LENGTH * np.round(dx / LENGTH)
+        dy = dy - LENGTH * np.round(dy / LENGTH)
+
+        # Distances squared
+        r2 = dx**2 + dy**2
+
+        # Particle overlapping condition
+        if r2 < sigma_0**2:
+            return np.inf
+
+        if r2 < sigma_1**2:
+            energy += 1
+
+    return energy
+
+
+def temperature_drop_production(coldstart,max_temp=0.3,min_temp=0.15,drop_step=0.01,density=0.291):
+    """
+    Monte-Carlo simulations of a temperature drop in the system
+    """
+    N = len(coldstart)
+    temperatures = []
+    T = max_temp
+
+    while T >= 0.20 - 1e-12:
+        temperatures.append(round(T, 3))
+        T -= 0.025
+
+    T = 0.19
+    while T >= min_temp - 1e-12:
+        temperatures.append(round(T, 3))
+        T -= 0.01
+    temperatures = list(dict.fromkeys(temperatures))
+
+    system = Particles_2D(N=N,temperature=temperatures[0],density=density,R=np.array(coldstart, copy=True))
+    for step, temperature in enumerate(temperatures):
+
+        print("\n")
+        print("#" * 70)
+        print(
+            f"T* = {temperature:.3f} "
+            f"({step + 1}/{len(temperatures)})"
+        )
+        print("#" * 70)
+
+        system.temperature = temperature
+        system.beta = 1.0 / temperature
+
+
+        system.reset_stats()
+        system.run_mc(max_iter=(10**7),equilibrium=True,production=False)
+        equilibrium_path = ("runs/equilibrium/"f"equ_{density}_{np.round(temperature,2)}_{N}.pkl")
+        with open(equilibrium_path, "wb") as f:
+            pickle.dump(system, f)
+
+
+        if temperature <= 0.2:
+            system.reset_stats()
+            system.run_mc(max_iter=2*(10**7),production=True,equilibrium=False)
+            production_path = ("runs/production/"f"prod_{density}_{np.round(temperature,2)}_{N}.pkl")
+            with open(production_path, "wb") as f:
+                pickle.dump(system, f)
+
+        system.print_status()
 
 
