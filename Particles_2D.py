@@ -45,9 +45,6 @@ class Particles_2D():
         self.delta_step = delta_step                # Delta parameter for random particle stepping
 
 
-        # Radial distribution attributes
-        self.bin_centers = None                     # Store an array after calling the gr function
-        self.gr = None                              # Store gr values         "          "
 
 
     def calc_total_U(self):
@@ -172,9 +169,21 @@ class Particles_2D():
     def run_mc(self,max_iter=2*(10**7),hotstart=False,production=False,equilibrium=False,delta_optim=False):
         """
         Monte-Carlo simulation of the system
+        1) Select a random particle and propose a random walk of it
+        2) Calculate energy contributions from selected particle in curren and previous state
+        3) Accept or reject to satisfy the detailed balance
+        4) Run extra features
+
+        INPUT
+        self :: particles system (class)
+        max_iter :: maximum of iterations (int)
+        hotstart :: running mode (boolean)
+        equilibrium :: running mode (boolean)
+        production :: running mode (boolean)
+        delta_optim :: dynamic optimization for random walk scale step (boolean) 
         """
         self.energy = self.calc_total_U()
-        self.max_iter = max_iter
+        self.max_iter = int(max_iter)
         accept_loc = 0
         for i in tqdm(range(max_iter),miniters=max(1, max_iter//100)):
             self.mc_iterations += 1
@@ -231,7 +240,7 @@ class Particles_2D():
                 self.energy = self.calc_total_U()
                 if abs((current_energy-self.energy)/self.energy) > 10**(-11):
                     raise ValueError(f"Energy discrepancy between\nCurrent energy:{current_energy}\nRecalculated energy:{self.energy}")
-
+                
                 self.overlaps = self.calc_total_overlaps()
                 if self.overlaps != 0:
                     raise ValueError(f"{self.overlaps} overlaps encountered")
@@ -259,7 +268,10 @@ class Particles_2D():
 
 
     def state_snapshot(self,directory=r"snapshots_drop_temp"):    
-
+        """
+        Exports a .jpg image of the particle scattering 
+        into the directory specified. (This directory MUST exist)
+        """
         fig, ax = plt.subplots()
         ax.scatter(self.R[:, 0], self.R[:, 1], color="#189536cc", alpha=0.67)
         
@@ -275,6 +287,9 @@ class Particles_2D():
 
 
     def scatter(self):
+        """
+        Plots an image of the particle scattering
+        """
         fig, ax = plt.subplots()
         ax.set_xlim(0, self.LENGTH)
         ax.set_ylim(0, self.LENGTH)
@@ -330,58 +345,51 @@ class Particles_2D():
         self.equilibrium_array = []
 
 
-    def radial_distribution(self, dr=0.05):
+    def radial_distribution(self,dr=0.1):
         """
-        Radial distribution function that plots the average density at a distance dr from a particle 
-        
-        Arguments:
-        dr : float
-            Width of distance bins.
-            
-        Returns:
-        bin_centers : np.ndarray, Radius values (r).
-        gr : np.ndarray, Radial distribution values g(r).
+        Radial distribution function
         """
-        n = len(self.R)
-        max_r = self.LENGTH / 2.0  # Only measure up to half the box size
+        a = 0
+        b = 0
+        max_r = self.LENGTH/3
         bins = np.arange(0, max_r + dr, dr)
-        
-        # 1. Compute all pairwise distances with Periodic Boundary Conditions (PBC)
-        distances = []
-        for i in range(n - 1):
-            dx = self.R[i, 0] - self.R[i+1:, 0]
-            dy = self.R[i, 1] - self.R[i+1:, 1]
-            
+        r = []
+        for i in range(self.N-1):
+            # coordinates differences from particle p to every other one
+            dx = self.R[i,0] - self.R[i+1:,0]
+            dy = self.R[i,1] - self.R[i+1:,1]
+
+            #PBC condition
             dx = dx - self.LENGTH * np.round(dx / self.LENGTH)
             dy = dy - self.LENGTH * np.round(dy / self.LENGTH)
-            
-            r = np.sqrt(dx**2 + dy**2)
-            distances.extend(r)
-        distances = np.array(distances)
-        
-        # 2. Histogram particle distances
-        counts, _ = np.histogram(distances, bins=bins)
-        
-        # Multiply by 2 because pair (i,j) means i sees j AND j sees i
-        counts = counts * 2.0
-        
-        # 3. Normalize to get g(r)
-        self.bin_centers = (bins[:-1] + bins[1:]) / 2.0
-        shell_areas = np.pi * (bins[1:]**2 - bins[:-1]**2)  # Area of circular ring
-        bulk_density = n / (self.LENGTH**2)                      # Average overall density
-        
-        # Normalization equation: local density / bulk density
-        self.gr = (counts / n) / (shell_areas * bulk_density)
 
-        plt.figure(figsize=(7, 4))
-        plt.plot(self.bin_centers, self.gr, lw=2)
-        plt.axhline(1.0, color="gray", linestyle="--")  # Ideal gas bulk limit
+            # Distances squared (duplicated for proper counting of averages)
+            r.extend(np.sqrt(dx**2 + dy**2))
+            r.extend(np.sqrt(dx**2 + dy**2))
+
+
+        distances = np.array(r)
+                
+        
+        bin_centers = (bins[:-1] + bins[1:]) / 2.0
+        shell_areas = np.pi * ((bins[1:]+b)**2 - (bins[:-1]-a)**2)  # Area of circular ring
+        bulk_density = self.N / (self.LENGTH**2)                    # Average overall density
+
+        counts = []
+        for i in range(len(bins)-1):
+            hi = bins[i+1]+b
+            lo = bins[i]-a
+            c = np.sum((distances > lo) & (distances < hi))
+            counts.append(c)
+        
+        #RDF: local density / bulk density
+        gr = (np.array(counts) / self.N) / (shell_areas * bulk_density)
+
+        plt.plot(bin_centers, gr, lw=2)
         plt.xlabel("Distance r")
         plt.ylabel("g(r)")
         plt.title("Radial Distribution Function")
-        plt.grid(True)
         plt.show()
-
 
 
 def coldstart_finder(N=100,max_iter=2*(10**5)):
@@ -448,15 +456,17 @@ def calc_individual_U(R,p_idx,p,LENGTH,sigma_0,sigma_1):
     return energy
 
 
-def temperature_drop_production(coldstart,max_temp=0.3,min_temp=0.15,drop_step=0.01,density=0.291):
+def temperature_drop_production(coldstart,max_temp=0.3,min_temp=0.15,density=0.291):
     """
-    Monte-Carlo simulations of a temperature drop in the system
+    Automatic Monte-Carlo simulations of a temperature drop in the system.
+    From maximum set T* to T*=0.25, drops of 0.025
+    From T*=0.25 to minimum T*, drops of 0.01
     """
     N = len(coldstart)
     temperatures = []
     T = max_temp
 
-    while T >= 0.20 - 1e-12:
+    while T >= 0.25 - 1e-12:
         temperatures.append(round(T, 3))
         T -= 0.025
 
@@ -482,18 +492,17 @@ def temperature_drop_production(coldstart,max_temp=0.3,min_temp=0.15,drop_step=0
 
 
         system.reset_stats()
-        system.run_mc(max_iter=(10**7),equilibrium=True,production=False)
+        system.run_mc(max_iter=2*(10**7),equilibrium=True,production=False,delta_optim=True)
         equilibrium_path = ("runs/equilibrium/"f"equ_{density}_{np.round(temperature,2)}_{N}.pkl")
         with open(equilibrium_path, "wb") as f:
             pickle.dump(system, f)
 
 
-        if temperature <= 0.2:
-            system.reset_stats()
-            system.run_mc(max_iter=2*(10**7),production=True,equilibrium=False)
-            production_path = ("runs/production/"f"prod_{density}_{np.round(temperature,2)}_{N}.pkl")
-            with open(production_path, "wb") as f:
-                pickle.dump(system, f)
+        system.reset_stats()
+        system.run_mc(max_iter=0.5*(10**7),production=True,equilibrium=False)
+        production_path = ("runs/production/"f"prod_{density}_{np.round(temperature,2)}_{N}.pkl")
+        with open(production_path, "wb") as f:
+            pickle.dump(system, f)
 
         system.print_status()
 
