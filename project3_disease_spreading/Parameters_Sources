@@ -7,7 +7,7 @@ Potentially useful for transmission rate (beta): using dynamic model to evaluate
 https://www.sciencedirect.com/science/article/pii/S1567134822001162
 
 
-SIR model for influenza implemented (includes beta based on 1957 Influenza pandemic):
+SIR model for influenza implemented (includes beta based on 1957 Influenza epidemic):
   Brauer, F., Castillo-Chavez, C., & Feng, Z. (2019). 
   Models for influenza. 
   In Texts in applied mathematics (pp. 311–350). 
