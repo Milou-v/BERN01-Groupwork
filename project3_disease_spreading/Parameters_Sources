@@ -4,7 +4,14 @@ Potentially useful for transmission rate (beta): using dynamic model to evaluate
   Dai, H., Zhou, N., Chen, M., Li, G., Yu, X., Su, Y., Yi, S., Hong, X., Quan, M., Zha, W., & Lv, Y. (2022). 
   transmissibility of different influenza subtypes: Based on a SEIABR model. 
   Infection Genetics and Evolution, 103, 105319. https://doi.org/10.1016/j.meegid.2022.105319
-  https://www.sciencedirect.com/science/article/pii/S1567134822001162
+https://www.sciencedirect.com/science/article/pii/S1567134822001162
 
+
+SIR model for influenza implemented (includes beta based on 1957 Influenza pandemic):
+  Brauer, F., Castillo-Chavez, C., & Feng, Z. (2019). 
+  Models for influenza. 
+  In Texts in applied mathematics (pp. 311–350). 
+  https://doi.org/10.1007/978-1-4939-9828-9_9
+https://pmc.ncbi.nlm.nih.gov/articles/PMC7316090/
 
 
