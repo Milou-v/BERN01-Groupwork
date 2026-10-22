@@ -172,12 +172,9 @@ def SIRD(status,t,params):
     """
     SIR model with natality and defunctions
     """
-    S = status[0]
-    I = status[1]
-    R = status[2]
-    D = status[3]
+    S, I, R, D = status.T
 
-    if t==0 and D > 0.0:
+    if t==0 and np.any(D) > 0.0:
         raise ValueError(f"SIRD Model should not start with {D} infection deaths")
 
     N = S+I+R
@@ -195,7 +192,7 @@ def SIRD(status,t,params):
     fr = gamma*S + alpha*I - Omega_R*R
     fd = Omega_I*I
     
-    return np.array([fs,fi,fr,fd])
+    return np.column_stack((fs,fi,fr,fd))
 
 
 def SIRM(status,t,params):
