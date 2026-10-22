@@ -174,7 +174,7 @@ def SIRD(status,t,params):
     """
     S, I, R, D = status.T
 
-    if t==0 and np.any(D) > 0.0:
+    if t==0 and np.any(D > 0.0):
         raise ValueError(f"SIRD Model should not start with {D} infection deaths")
 
     N = S+I+R
