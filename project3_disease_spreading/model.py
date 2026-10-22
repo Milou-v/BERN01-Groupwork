@@ -16,7 +16,6 @@ class model:
     |N -> initial number of population
     |gamma -> vaccinations per unit of time
     |alpha -> recoveries per unit of time
-    |initial_value -> [S,I,R] initial value
     |model_function -> model function selected
 
     ---------------
@@ -36,7 +35,8 @@ class model:
                  N:int,
                  gamma:float,
                  alpha:float,
-                     model_function:str,
+                 model_function:str,
+                 initial_status:list,
                  Alpha:float=0.0,
                  Omega_S:float=0.0,
                  Omega_I:float=0.0,
@@ -56,8 +56,14 @@ class model:
         self._Omega_I = Omega_I
         self._Omega_R = Omega_R
 
+        #Initial state
+        self._initial_status = np.array(initial_status)[np.newaxis,:]
+        if sum(initial_status) != N:
+            raise ValueError(f"Provided initial status must sum up to the initial population value")
+        
         #Total parameters
         self.total_parameters = {
+            "initial_status":self._initial_status,
             "N":self._N,
             "beta":self._beta,
             "gamma":self._gamma,
@@ -69,12 +75,15 @@ class model:
         }
 
         #ODE system function
+        self._set_model_function(model_function)
+
+
+    def _set_model_function(self,model_function: str):
         self.model = model_function
         self._model_function = partial(model_functions[model_function],
-                                       params=self.total_parameters)
-
-
-    def euler_solver(self,delta_t:float,T_max:float,initial_status=np.array):
+                                        params=self.total_parameters)
+        
+    def euler_solver(self,delta_t:float,T_max:float,initial_status:np.array=None):
         """
         Given an initial [S,I,R] (or other lenght array) values, solve the system according 
         to Euler's method
@@ -86,6 +95,8 @@ class model:
         initial_status -> [S,I,R] initial values
 
         """
+        if initial_status is None:
+            initial_status = self._initial_status
         f = self._model_function
         status = np.array(initial_status,dtype=float)
         time = np.arange(start=0,stop=T_max,step=delta_t)
@@ -97,7 +108,7 @@ class model:
         return time,np.array(status_array)
 
 
-    def RK4_solver(self,delta_t:float,T_max:float,initial_status:np.array):
+    def RK4_solver(self,delta_t:float,T_max:float,initial_status:np.array=None):
         """
         Given an initial [S,I,R] (or other lenght array) values, solve the system according 
         to Runge-Kutta with 4 steps
@@ -109,6 +120,8 @@ class model:
         initial_status -> [S,I,R] initial values
 
         """
+        if initial_status is None:
+            initial_status = self._initial_status
         f = self._model_function
         status = np.array(initial_status,dtype=float)
         time = np.arange(start=0,stop=T_max,step=delta_t)
@@ -136,9 +149,8 @@ def SIR(status,t,params):
     """
     Normal SIR model
     """
-    S = status[0]
-    I = status[1]
-    R = status[2]
+
+    S,I,R = status.T
 
     N = params["N"]
     beta = params["beta"]
@@ -149,11 +161,11 @@ def SIR(status,t,params):
     fi =  beta*S*I/N - alpha*I
     fr = gamma*S + alpha*I
 
-    if abs(S+I+R-N) > tol:
-        raise ValueError(f"SIR Model discrepancy between\n\nFixed population\nN:{N}\n\n"+
-                         f"Population status\nS:{S}\nI:{I}\nR:{R}\n\nCheck for correct initial values")
+    # if np.any(np.abs(S+I+R-N)) > tol:
+    #     raise ValueError("SIR Model discrepancy between fixed population and population status"+
+    #                      "\n\nCheck for correct initial values")
     
-    return np.array([fs,fi,fr])
+    return np.column_stack((fs,fi,fr))
 
 
 def SIRD(status,t,params):
@@ -186,7 +198,13 @@ def SIRD(status,t,params):
     return np.array([fs,fi,fr,fd])
 
 
+def SIRM(status,t,params):
+    """
+    SIR model with mobility
+    """
+
 model_functions = { "basic_SIR": SIR,
-                    "mortality_SIR": SIRD}
+                    "mortality_SIR": SIRD,
+                    "mobility_SIR":SIRM}
 
 tol = 1e-6
