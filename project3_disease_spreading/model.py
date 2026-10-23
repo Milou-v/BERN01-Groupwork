@@ -35,8 +35,8 @@ class model:
                  N:int,
                  gamma:float,
                  alpha:float,
-                 model_function:str,
                  initial_status:list,
+                 model_function:str="basic_SIR",
                  Alpha:float=0.0,
                  Omega_S:float=0.0,
                  Omega_I:float=0.0,
@@ -197,8 +197,26 @@ def SIRD(status,t,params):
 
 def SIRM(status,t,params):
     """
-    SIR model with mobility
+    SIR model with permanent mobility between multiregions
+
+    W matrix represents the mobility matrix:
+    elemnt ij is the ratio of population moving from j to i per unit of time
     """
+    S,I,R = status.T
+
+    W = params["W"]
+    O = W.sum(axis=0) #Outflow
+    N = S+I+R
+    beta = params["beta"]
+    gamma = params["gamma"]
+    alpha = params["alpha"]
+
+    fs = -beta*S*I/N - gamma*S + W @ S - O*S
+    fi =  beta*S*I/N - alpha*I + W @ I - O*I
+    fr = gamma*S + alpha*I + W @ R - O*R
+
+
+    return np.column_stack((fs,fi,fr))
 
 model_functions = { "basic_SIR": SIR,
                     "mortality_SIR": SIRD,
