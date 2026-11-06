@@ -31,12 +31,13 @@ class multiregion_model(model):
         self._set_model_function(model_function)
 
         # Mobility-weights
-        if mobility_weights is not None and mobility_weights.shape[0] == self.n_regions:
-            self.total_parameters["W"] = mobility_weights
-        else:
-            if model_function == "mobility_SIR":
-                raise ValueError("Mobility function selected but no correct mobility matrix provided\n"+
-                                 "Please provide a correct mobility matrix")
+        self.total_parameters["W"] = mobility_weights
+        # if mobility_weights is not None and mobility_weights.shape[0] == self.n_regions:
+        #     self.total_parameters["W"] = mobility_weights
+        # else:
+        #     if model_function == "mobility_SIR":
+        #         raise ValueError("Mobility function selected but no correct mobility matrix provided\n"+
+        #                          "Please provide a correct mobility matrix")
             
         
 

@@ -3,6 +3,22 @@ from functools import partial
 from tqdm import tqdm
 
 
+def evaluate(value, t):
+    if callable(value):
+        return value(t)
+
+    if isinstance(value, (list, tuple, np.ndarray)):
+        array = np.asarray(value, dtype=object)
+        if any(callable(item) for item in array.flat):
+            values = (
+                item(t) if callable(item) else item
+                for item in array.flat
+            )
+            return np.fromiter(values, dtype=float, count=array.size).reshape(array.shape)
+
+    return value
+
+
 class model:
     """
     Object for representing classical SIR model,
@@ -46,7 +62,7 @@ class model:
         self._N = N
         self._sigma = sigma
         self._T = T
-        self._beta = sigma*T
+        self._beta = lambda t: evaluate(sigma,t)*evaluate(T,t)
         self._gamma = gamma
         self._alpha = alpha
 
@@ -82,7 +98,7 @@ class model:
         self.model = model_function
         self._model_function = partial(model_functions[model_function],
                                         params=self.total_parameters)
-        
+
     def euler_solver(self,delta_t:float,T_max:float,initial_status:np.array=None):
         """
         Given an initial [S,I,R] (or other lenght array) values, solve the system according 
@@ -97,6 +113,8 @@ class model:
         """
         if initial_status is None:
             initial_status = self._initial_status
+        else:
+            initial_status = np.array(initial_status)[np.newaxis,:]
         f = self._model_function
         status = np.array(initial_status,dtype=float)
         time = np.arange(start=0,stop=T_max,step=delta_t)
@@ -122,6 +140,8 @@ class model:
         """
         if initial_status is None:
             initial_status = self._initial_status
+        else:
+            initial_status = np.array(initial_status)[np.newaxis,:]
         f = self._model_function
         status = np.array(initial_status,dtype=float)
         time = np.arange(start=0,stop=T_max,step=delta_t)
@@ -152,10 +172,10 @@ def SIR(status,t,params):
 
     S,I,R = status.T
 
-    N = params["N"]
-    beta = params["beta"]
-    gamma = params["gamma"]
-    alpha = params["alpha"]
+    N = evaluate(params["N"],t)
+    beta = evaluate(params["beta"],t)
+    gamma = evaluate(params["gamma"],t)
+    alpha = evaluate(params["alpha"],t)
 
     fs = -beta*S*I/N - gamma*S
     fi =  beta*S*I/N - alpha*I
@@ -178,14 +198,14 @@ def SIRD(status,t,params):
         raise ValueError(f"SIRD Model should not start with {D} infection deaths")
 
     N = S+I+R
-    beta = params["beta"]
-    gamma = params["gamma"]
-    alpha = params["alpha"]
+    beta = evaluate(params["beta"],t)
+    gamma = evaluate(params["gamma"],t)
+    alpha = evaluate(params["alpha"],t)
 
-    Alpha = params["Alpha"]
-    Omega_S = params["Omega_S"]
-    Omega_I = params["Omega_I"]
-    Omega_R = params["Omega_R"]
+    Alpha = evaluate(params["Alpha"],t)
+    Omega_S = evaluate(params["Omega_S"],t)
+    Omega_I = evaluate(params["Omega_I"],t)
+    Omega_R = evaluate(params["Omega_R"],t)
 
     fs = -beta*S*I/N - gamma*S + Alpha - Omega_S*S
     fi =  beta*S*I/N - alpha*I - Omega_I*I
@@ -204,12 +224,12 @@ def SIRM(status,t,params):
     """
     S,I,R = status.T
 
-    W = params["W"]
+    W = evaluate(params["W"],t)
     O = W.sum(axis=0) #Outflow
     N = S+I+R
-    beta = params["beta"]
-    gamma = params["gamma"]
-    alpha = params["alpha"]
+    beta = evaluate(params["beta"],t)
+    gamma = evaluate(params["gamma"],t)
+    alpha = evaluate(params["alpha"],t)
 
     fs = -beta*S*I/N - gamma*S + W @ S - O*S
     fi =  beta*S*I/N - alpha*I + W @ I - O*I
@@ -218,8 +238,34 @@ def SIRM(status,t,params):
 
     return np.column_stack((fs,fi,fr))
 
+
+def SIRMM(status,t,params):
+    """
+    SIR model with permanent mobility between multiregions
+
+    W matrix represents the mobility matrix:
+    elemnt ij is the ratio of population moving from j to i per unit of time
+    """
+    S,I,R = status.T
+
+    W = evaluate(params["W"],t)
+    O = W.sum(axis=0) #Outflow
+    N = S+I+R
+    beta = evaluate(params["beta"],t)
+    gamma = evaluate(params["gamma"],t)
+    alpha = evaluate(params["alpha"],t)
+
+    fs = -beta*S*(I+ W @ I - O*I)/(N + W @ N - O*N ) - gamma*S
+    fi = beta*S*(I+ W @ I - O*I)/(N + W @ N - O*N ) - alpha*I 
+    fr = gamma*S + alpha*I
+
+
+    return np.column_stack((fs,fi,fr))
+
+
 model_functions = { "basic_SIR": SIR,
                     "mortality_SIR": SIRD,
-                    "mobility_SIR":SIRM}
+                    "mobility_SIR":SIRM,
+                    "modified_mobility_SIR":SIRMM}
 
 tol = 1e-6
