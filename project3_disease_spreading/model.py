@@ -163,6 +163,56 @@ class model:
         return time,np.array(status_array)
 
 
+    def estimate_numerical_errors(self, delta_t: float, T_max: float):
+        """
+        Solves the system using both Euler and RK4, then estimates 
+        truncation and round-off errors.
+        """
+        # 1. Run both solvers and squeeze out any extra dimensions (e.g., shape (n, 1, 3) -> (n, 3))
+        time_euler, sol_euler = self.euler_solver(delta_t=delta_t, T_max=T_max)
+        time_rk4, sol_rk4 = self.RK4_solver(delta_t=delta_t, T_max=T_max)
+        
+        sol_euler = np.squeeze(sol_euler)
+        sol_rk4 = np.squeeze(sol_rk4)
+        
+        # 2. Truncation Error Estimation (Euler vs RK4 Reference)
+        abs_trunc_error = np.abs(sol_euler - sol_rk4)  # Shape: (n_timesteps, 3)
+        max_trunc_error = np.max(abs_trunc_error, axis=0)  # Max error per category [S, I, R]
+        
+        # Relative truncation error
+        rel_trunc_error = abs_trunc_error / (np.abs(sol_rk4) + 1e-15)
+        max_rel_trunc_error = np.max(rel_trunc_error, axis=0)
+        
+        # Root Mean Square Error (RMSE) for each category
+        rmse = np.sqrt(np.mean(abs_trunc_error**2, axis=0))
+        
+        # 3. Round-off Error Estimation
+        mu = 2**(-52)  # 64-bit double precision machine epsilon (~2.22e-16)
+        n_steps = len(time_euler)
+        accumulated_roundoff = np.sqrt(n_steps) * mu
+        
+        # 4. Print Summary Report Safely using .item()
+        print(f"==================================================")
+        print(f" NUMERICAL ERROR ANALYSIS (delta_t = {delta_t}, Steps = {n_steps})")
+        print(f"==================================================")
+        print(f"Machine Epsilon (μ): {mu:.2e}")
+        print(f"Estimated Accumulated Round-off Error: ~{accumulated_roundoff:.2e}\n")
+        
+        categories = ['Susceptible (S)', 'Infected (I)', 'Recovered (R)']
+        for i, cat in enumerate(categories):
+            print(f"[{cat}]")
+            print(f"  Max Absolute Truncation Error: {max_trunc_error[i].item():.6e}")
+            print(f"  Max Relative Truncation Error: {max_rel_trunc_error[i].item():.4%}")
+            print(f"  RMSE:                          {rmse[i].item():.6e}")
+            print("-" * 50)
+            
+        return {
+            'abs_trunc_error': abs_trunc_error,
+            'max_trunc_error': max_trunc_error,
+            'rmse': rmse,
+            'roundoff_estimate': accumulated_roundoff
+        }
+
 
 ## MODEL SYSTEM FUNCTIONS
 def SIR(status,t,params):
@@ -190,7 +240,7 @@ def SIR(status,t,params):
 
 def SIRD(status,t,params):
     """
-    SIR model with natality and defunctions
+    SIR model with natality and de[ath ]functions
     """
     S, I, R, D = status.T
 
